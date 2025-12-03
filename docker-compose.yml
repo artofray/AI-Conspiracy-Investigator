@@ -1,0 +1,83 @@
+# SHADOW - Docker Compose Configuration
+# Run: docker-compose up -d
+
+version: '3.8'
+
+services:
+  # Main API Server
+  shadow-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+      - ./foia_downloads:/app/foia_downloads
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DATABASE_PATH=/app/data/shadow.db
+    command: python shadow_backend.py server --host 0.0.0.0 --port 5000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Social Media Monitor
+  shadow-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TWITTER_BEARER_TOKEN=${TWITTER_BEARER_TOKEN:-}
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID:-}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET:-}
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY:-}
+      - NEWSAPI_KEY=${NEWSAPI_KEY:-}
+      - DATABASE_PATH=/app/data/social_monitor.db
+    command: python social_monitor.py run --websocket --port 8765
+    restart: unless-stopped
+    depends_on:
+      - shadow-api
+
+  # Frontend (React)
+  shadow-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000
+      - REACT_APP_WS_URL=ws://localhost:8765
+    depends_on:
+      - shadow-api
+      - shadow-monitor
+    restart: unless-stopped
+
+  # ChromaDB Vector Database (Optional - for production)
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+    restart: unless-stopped
+
+volumes:
+  data:
+  foia_downloads:
+  chroma_data:
+
+networks:
+  default:
+    name: shadow-network
